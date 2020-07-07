@@ -108,7 +108,7 @@ ARG __DATA_DIR__
 LABEL \
   maintainer="Frederico Martins <https://hub.docker.com/u/fscm/>" \
   vendor="fscm" \
-  cmd="docker container run --interactive --privileged --publish 2376:2376/tcp --rm --tty fscm/docker:centos" \
+  cmd="docker container run --detach --privileged --publish 2375:2375/tcp fscm/docker:centos start" \
   params="--volume ./:${__DATA_DIR__}:rw"
 
 ENV \

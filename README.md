@@ -44,14 +44,14 @@ and added to the container when running the same.
 
 #### Creating Volumes
 
-To be able to make all of the TLS configuration settings persistent, the same
-will have to be stored on a different volume.
+To be able to make all of the Docker daemon configuration settings persistent,
+the same will have to be stored on a different volume.
 
 Creating volumes can be done using the `docker` tool. To create a volume use
 the following command:
 
 ```
-docker volume create --name <VOLUME_NAME>
+docker volume create --name VOLUME_NAME
 ```
 
 Two create the required volume the following command can be used:
@@ -68,17 +68,18 @@ the folder in place of the volume name.
 To configure the Docker daemon the `init` command must be used.
 
 ```
-docker container run --volume <DOCKER_VOL>:/data:rw --rm <USER>/<IMAGE>:<TAG> [options] init
+docker container run --volume DOCKER_VOL:/data:rw --rm fscm/docker [options] init
 ```
 
 * `-t` - Enable TLS by creating the required keys.
 
-After this step the Docker daemon should be configured and ready to be used.
+After this step the Docker daemon should be configured and ready to be
+used.
 
 An example on how to configure the Docker daemon:
 
 ```
-docker container run --volume my_docker:/data:rw --rm johndoe/my_docker -t init
+docker container run --volume my_docker:/data:rw --rm fscm/docker -t init
 ```
 
 **Note:** All the configuration files will be created and placed on the Docker
@@ -86,13 +87,16 @@ volume.
 
 #### Start the Docker daemon
 
+
 After configuring the Docker daemon the same can now be started.
 
 Starting the Docker daemon can be done with the `start` command.
 
 ```
-docker container run --volume <DOCKER_VOL>:/data:rw --detach --publish 2375:2375/tcp  --publish 2376:2376/tcp <USER>/<IMAGE>:<TAG> start
+docker container run --volume DOCKER_VOL:/data:rw --detach --privileged --publish 2375:2375/tcp --publish 2376:2376/tcp fscm/docker [options] start
 ```
+
+* `-t` - Enable TLS.
 
 To help managing the container and the Docker daemon instance a name can be
 given to the container. To do this use the `--name <NAME>` docker option when
@@ -101,32 +105,32 @@ starting the server
 An example on how the Docker daemon can be started:
 
 ```
-docker container --volume my_docker:/data:rw --detach --publish 2375:2375/tcp  --publish 2376:2376/tcp --name my_docker johndoe/my_docker start
+docker container run --volume my_docker:/data:rw --detach --privileged --publish 2375:2375/tcp --publish 2376:2376/tcp  --name my_docker fscm/docker start
 ```
 
 To see the output of the container that was started use the following command:
 
 ```
-docker container attach <CONTAINER_ID>
+docker container attach CONTAINER_ID
 ```
 
 Use the `ctrl+p` `ctrl+q` command sequence to detach from the container.
 
 #### Stop the Docker daemon
 
-If needed the Docker daemon can be stoped and later started again (as long as
-the command used to perform the initial start was as indicated before).
+If needed the Docker daemon server can be stoped and later started again (as
+long as the command used to perform the initial start was as indicated before).
 
 To stop the server use the following command:
 
 ```
-docker container stop <CONTAINER_ID>
+docker container stop CONTAINER_ID
 ```
 
 To start the server again use the following command:
 
 ```
-docker container start <CONTAINER_ID>
+docker container start CONTAINER_ID
 ```
 
 ### Docker daemon Status
@@ -135,7 +139,7 @@ The Docker daemon status can be check by looking at the Docker daemon output
 data using the docker command:
 
 ```
-docker container logs <CONTAINER_ID>
+docker container logs CONTAINER_ID
 ```
 
 ## Build
