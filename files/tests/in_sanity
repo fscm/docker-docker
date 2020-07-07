@@ -68,13 +68,13 @@ else
   exit 6
 fi
 
-printf '[TEST] Running a Docker container... '
-if (docker container run --rm --interactive fscm/centos:latest bash -c 'echo Hello Docker!' | grep -q '^Hello Docker!$') > /dev/null 2>&1; then
-  echo 'OK'
-else
-  echo 'Failed'
-  exit 7
-fi
+# printf '[TEST] Running a Docker container... '
+# if (docker container run --rm --interactive fscm/centos:latest bash -c 'echo Hello Docker!' | grep -q '^Hello Docker!$') > /dev/null 2>&1; then
+#   echo 'OK'
+# else
+#   echo 'Failed'
+#   exit 7
+# fi
 
 printf '[TEST] Stoping Docker daemon... '
 if kill -2 "$(cat /var/run/docker.pid)"  > /dev/null 2>&1; then
