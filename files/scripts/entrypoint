@@ -1,0 +1,243 @@
+#!/bin/sh
+#
+# Shell script to start the Docker Docker image.
+#
+# Copyright 2016-2020, Frederico Martins
+#   Author: Frederico Martins <http://github.com/fscm>
+#
+# SPDX-License-Identifier: MIT
+#
+# This program is free software. You can use it and/or modify it under the
+# terms of the MIT License.
+#
+
+set -e
+
+BASENAME=$(basename "${0}")
+
+
+# Variables
+ACTION_HELP=0
+ACTION_INIT=0
+ACTION_START=0
+TLS_ENABLED=0
+
+__DATA_DIR__="/data"
+__DOCKER_TLS_CERTDIR__="${DOCKER_TLS_CERTDIR:-${__DATA_DIR__}/certs}"
+
+__CA_PRI_KEY__="${__DOCKER_TLS_CERTDIR__}/ca-key.pem"
+__CA_PUB_KEY__="${__DOCKER_TLS_CERTDIR__}/ca.pem"
+__CLI_CSR__="${__DOCKER_TLS_CERTDIR__}/client.csr"
+__CLI_OPENSSL_CNF__="${__DOCKER_TLS_CERTDIR__}/client-openssl.cnf"
+__CLI_PRI_KEY__="${__DOCKER_TLS_CERTDIR__}/client-key.pem"
+__CLI_PUB_KEY__="${__DOCKER_TLS_CERTDIR__}/client.pem"
+__SRV_CSR__="${__DOCKER_TLS_CERTDIR__}/server.csr"
+__SRV_OPENSSL_CNF__="${__DOCKER_TLS_CERTDIR__}/server-openssl.cnf"
+__SRV_PRI_KEY__="${__DOCKER_TLS_CERTDIR__}/server-key.pem"
+__SRV_PUB_KEY__="${__DOCKER_TLS_CERTDIR__}/server.pem"
+
+
+# Usage
+show_usage() {
+  echo "Usage: ${BASENAME} [options] (help|init|start)"
+  echo "  help:"
+  echo "    <none>"
+  echo "  init:"
+  echo "    -t    Enable TLS support."
+  echo "  start:"
+  echo "    -t    Enable TLS support."
+}
+
+
+# Options parsing
+while getopts ":t" opt; do
+  case ${opt} in
+    t)
+      TLS_ENABLED=1
+      ;;
+    \?)
+      echo >&2 "  [ERROR] Invalid option: -${OPTARG}"
+      exit 1
+      ;;
+    :)
+      echo >&2 "  [ERROR] Option -${OPTARG} requires an argument"
+      exit 2
+      ;;
+  esac
+done
+
+shift $((OPTIND-1))
+
+for command in "${@}"; do
+  case "${command}" in
+    [Hh][Ee][Ll][Pp])
+      ACTION_HELP=1
+      ;;
+    [Ii][Nn][Ii][Tt])
+      ACTION_INIT=1
+      ;;
+    [Ss][Tt][Aa][Rr][Tt])
+      ACTION_START=1
+      ;;
+    *)
+      #echo >&2 "  [WARN] Unknown command '${command}'"
+      exec "$@"
+      ;;
+  esac
+done
+
+
+# Check arguments
+if [ $# -eq 0 ]; then
+  show_usage
+  exit 3
+fi
+if [ "$((ACTION_HELP+ACTION_INIT+ACTION_START))" -eq 0 ]; then
+  show_usage
+  exit 0
+fi
+
+
+# Check permissions
+#if [[ "$(id -u)" -ne 0 ]]; then
+#  echo >&2 "  [ERROR] This script requires privileged access to system files"
+#  exit 4
+#fi
+
+
+# === HELP ===
+if [ "${ACTION_HELP}" -gt 0 ]; then
+  show_usage
+  exit 0
+fi
+
+
+# === INIT ===
+if [ "${ACTION_INIT}" -gt 0 ]; then
+
+  # Create temporary dir (if needed)
+  if ! [ -d /tmp ]; then
+    mkdir -m 1777 /tmp
+  fi
+
+  # TLS configuration
+  if [ "${TLS_ENABLED}" -gt 0 ]; then
+
+    # Create certificates dir (if needed)
+    if ! [ -d "${__DOCKER_TLS_CERTDIR__}" ]; then
+      mkdir -p "${__DOCKER_TLS_CERTDIR__}"
+      chmod 0755 "${__DOCKER_TLS_CERTDIR__}"
+    fi
+
+    # Create or update certificates
+    echo '  [INFO] Creating/Updating certificates...'
+
+    # _variables_
+    _tls_san_=$( \
+      { \
+        ip -oneline address | awk '{gsub(/\/.+$/,"",$4); print "IP:" $4}'; \
+        { \
+          cat '/etc/hostname'; \
+          hostname --short; \
+          hostname --fqdn; \
+          echo 'docker'; \
+          echo 'localhost'; \
+        } | sed 's/^/DNS:/'; \
+      } | sort --unique | xargs | sed 's/[[:space:]]/,/g' \
+    )
+
+    # CA
+    if ! [ -s "${__CA_PRI_KEY__}" ]; then
+      openssl genrsa -out "${__CA_PRI_KEY__}" 4096
+    fi
+    openssl req \
+      -new \
+      -x509 \
+      -days 825 \
+      -subj '/CN=fscm:docker CA' \
+      -key "${__CA_PRI_KEY__}" \
+      -out "${__CA_PUB_KEY__}"
+
+    # Server
+    if ! [ -s "${__SRV_PRI_KEY__}" ]; then
+      openssl genrsa -out "${__SRV_PRI_KEY__}" 4096
+    fi
+    openssl req \
+      -new \
+      -key "${__SRV_PRI_KEY__}" \
+      -subj '/CN=fscm:docker Server' \
+      -addext "subjectAltName = ${_tls_san_}" \
+      -out "${__SRV_CSR__}"
+    printf 'subjectAltName = %s\n' "${_tls_san_}" > "${__SRV_OPENSSL_CNF__}"
+    openssl x509 \
+      -req \
+      -in "${__SRV_CSR__}" \
+      -CA "${__CA_PUB_KEY__}" \
+      -CAkey "${__CA_PRI_KEY__}" \
+      -CAcreateserial \
+      -days 825 \
+      -extfile "${__SRV_OPENSSL_CNF__}" \
+      -out "${__SRV_PUB_KEY__}"
+    openssl verify -CAfile "${__CA_PUB_KEY__}" "${__SRV_PUB_KEY__}"
+
+    # Client
+    if ! [ -s "${__CLI_PRI_KEY__}" ]; then
+      openssl genrsa -out "${__CLI_PRI_KEY__}" 4096
+      chmod 0644 "${__CLI_PRI_KEY__}"
+    fi
+    openssl req \
+      -new \
+      -key "${__CLI_PRI_KEY__}" \
+      -subj '/CN=fscm:docker Client' \
+      -out "${__CLI_CSR__}"
+    printf 'extendedKeyUsage = clientAuth' > "${__CLI_OPENSSL_CNF__}"
+    openssl x509 \
+      -req \
+      -in "${__CLI_CSR__}" \
+      -CA "${__CA_PUB_KEY__}" \
+      -CAkey "${__CA_PRI_KEY__}" \
+      -CAcreateserial \
+      -days 825 \
+      -extfile "${__CLI_OPENSSL_CNF__}" \
+      -out "${__CLI_PUB_KEY__}"
+    openssl verify -CAfile "${__CA_PUB_KEY__}" "${__CLI_PUB_KEY__}"
+
+    echo "  [INFO] Certificate(s) successfully created/updated"
+  fi
+
+  # All done
+  echo "  [INFO] Configuration(s) successfully updated"
+fi
+
+
+# === START ===
+if [ "${ACTION_START}" -gt 0 ]; then
+
+  # Create temporary dir (if needed)
+  if ! [ -d /tmp ]; then
+    mkdir -m 1777 /tmp
+  fi
+
+  # Start the Docker daemon
+  if [ "${TLS_ENABLED}" -gt 0 ]; then
+    if [ -s "${__SRV_PUB_KEY__}" ]; then
+      dockerd \
+        --host="unix:///var/run/docker.sock" \
+        --host='tcp://0.0.0.0:2376' \
+        --tlsverify \
+        --tlscacert "${__CA_PUB_KEY__}" \
+        --tlscert "${__SRV_PUB_KEY__}" \
+        --tlskey "${__SRV_PRI_KEY__}"
+    else
+      echo >&2 '  [ERROR] Docker TLS configuration not found.'
+      exit 5
+    fi
+  else
+    dockerd \
+      --host="unix:///var/run/docker.sock" \
+      --host='tcp://0.0.0.0:2375'
+  fi
+fi
+
+# All done
+exit 0

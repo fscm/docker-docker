@@ -1,0 +1,194 @@
+# global args
+ARG __BUILD_DIR__="/build"
+ARG __DATA_DIR__="/data"
+
+
+
+FROM fscm/centos:8 as build
+
+ARG __BUILD_DIR__
+ARG __DATA_DIR__
+ARG DOCKER_CHANNEL="stable"
+ARG DOCKER_VERSION="19.03.9"
+ARG DOCKER_COMPOSE_VERSION="1.26.2"
+ARG __USER__="root"
+ARG __WORK_DIR__="/work"
+
+ENV \
+  LANG="C.utf8" \
+  LC_ALL="C.utf8"
+
+USER ${__USER__}
+
+#COPY --chown="${__USER__}":${__USER__} "LICENSE" "files/" "${__WORK_DIR__}/"
+COPY "LICENSE" "files/" "${__WORK_DIR__}/"
+
+WORKDIR "${__WORK_DIR__}"
+
+SHELL ["/bin/bash", "-c"]
+
+RUN \
+# build env
+  echo '=== setting build env ===' && \
+  time { \
+    set +h && \
+    export TIMEFORMAT='=== time taken: %lR (s:%lS u:%lU)' ; \
+  } && \
+# build structure
+  echo '=== creating build structure ===' && \
+  time { \
+    for folder in /usr/local/bin /usr/bin /licenses; do install --directory --owner=${__USER__} --group=${__USER__} --mode=0755 "${__BUILD_DIR__}${folder}"; done && \
+    for folder in /tmp "${__DATA_DIR__}"; do install --directory --owner=${__USER__} --group=${__USER__} --mode=1777 "${__BUILD_DIR__}${folder}"; done ; \
+  } && \
+# copy tests
+  echo '=== copying test files ===' && \
+  time { \
+    install --owner="${__USER__}" --group="${__USER__}" --mode=0755 --target-directory="${__BUILD_DIR__}/usr/bin" "${__WORK_DIR__}/tests"/* ; \
+  } && \
+# copy scripts
+  echo '=== copying scripts ===' && \
+  time { \
+    install --owner="${__USER__}" --group="${__USER__}" --mode=0755 --target-directory="${__BUILD_DIR__}/usr/bin" "${__WORK_DIR__}/scripts"/* ; \
+  } && \
+# dependencies
+  echo '=== instaling dependencies ===' && \
+  time { \
+    yum --assumeyes --quiet --setopt=install_weak_deps=False install \
+      binutils \
+      curl \
+      findutils \
+      gzip \
+      tar ; \
+  } && \
+# docker
+  echo '=== installing docker ===' && \
+  time { \
+    curl --silent --location --retry 3 "https://download.docker.com/linux/static/${DOCKER_CHANNEL}/x86_64/docker-${DOCKER_VERSION}.tgz" \
+      | tar --extract --gunzip --no-same-owner --strip-components=1 --directory="${__BUILD_DIR__}/usr/local/bin" && \
+    install --directory --owner="${__USER__}" --group="${__USER__}" --mode=0755 "${__BUILD_DIR__}/licenses/docker" && \
+    curl --silent --location --retry 3 "https://raw.githubusercontent.com/docker/compose/master/LICENSE" \
+      --output "${__BUILD_DIR__}/licenses/docker/LICENSE" ; \
+  } && \
+# docker-compose
+  echo '=== installing docker-compose ===' && \
+  time { \
+    curl --silent --location --retry 3 "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-Linux-x86_64" \
+      --output "${__BUILD_DIR__}/usr/local/bin/docker-compose" && \
+    chmod 0755 "${__BUILD_DIR__}/usr/local/bin/docker-compose" && \
+    install --directory --owner="${__USER__}" --group="${__USER__}" --mode=0755 "${__BUILD_DIR__}/licenses/docker-compose" && \
+    curl --silent --location --retry 3 "https://raw.githubusercontent.com/docker/compose/master/LICENSE" \
+      --output "${__BUILD_DIR__}/licenses/docker-compose/LICENSE" ; \
+  } && \
+# stripping
+  echo '=== stripping libraries and binaries ===' && \
+  time { \
+    find "${__BUILD_DIR__}/usr/local/bin" -type f -not -links +1 -exec strip --strip-all {} ';' ; \
+  } && \
+# licenses
+  echo '=== project licenses ===' && \
+  time { \
+    install --owner=${__USER__} --group=${__USER__} --mode=0644 --target-directory="${__BUILD_DIR__}/licenses" "${__WORK_DIR__}/LICENSE" ; \
+  } && \
+# system settings
+  echo '=== system settings ===' && \
+  time { \
+    install --directory --owner="${__USER__}" --group="${__USER__}" --mode=0755 "${__BUILD_DIR__}/run/systemd" && \
+    echo 'docker' > "${__BUILD_DIR__}/run/systemd/container" ; \
+  } && \
+# done
+  echo '=== all done! ==='
+
+
+
+FROM fscm/centos:8
+
+ARG __BUILD_DIR__
+ARG __DATA_DIR__
+
+LABEL \
+  maintainer="Frederico Martins <https://hub.docker.com/u/fscm/>" \
+  vendor="fscm" \
+  cmd="docker container run --interactive --privileged --publish 2376:2376/tcp --rm --tty fscm/docker:centos" \
+  params="--volume ./:${__DATA_DIR__}:rw"
+
+ENV \
+  LANG="C.utf8" \
+  LC_ALL="C.utf8" \
+  DOCKER_TLS_CERTDIR="${__DATA_DIR__}/certs"
+
+EXPOSE \
+  2375/tcp \
+  2376/tcp
+
+COPY --from=build "${__BUILD_DIR__}" "/"
+
+VOLUME ["${__DATA_DIR__}"]
+
+WORKDIR "${__DATA_DIR__}"
+
+SHELL ["/bin/bash", "-c"]
+
+RUN \
+# build env
+  echo '=== setting build env ===' && \
+  time { \
+    set +h && \
+    export TIMEFORMAT='=== time taken: %lR (s:%lS u:%lU)' ; \
+  } && \
+# dependencies
+  echo '=== instaling dependencies ===' && \
+  time { \
+    #yum --assumeyes --quiet --setopt=install_weak_deps=False update && \
+    yum --assumeyes --quiet --setopt=install_weak_deps=False install \
+      ca-certificates \
+      curl \
+      device-mapper-libs \
+      e2fsprogs \
+      e2fsprogs-libs \
+      findutils \
+      gzip \
+      iproute \
+      iptables \
+      kmod \
+      libcgroup \
+      libseccomp \
+      openssl \
+      openssl-libs \
+      tar \
+      xfsprogs \
+      xz ; \
+  } && \
+# cleanup
+  echo '=== cleaning up ===' && \
+  time { \
+    find "/lib/systemd/system/sysinit.target.wants" \( -type l -o -type f \) -not -name 'systemd-tmpfiles-setup.service' -delete && \
+    find "/etc/systemd/system"/*.wants \( -type l -o -type f \) -delete && \
+    rm -f "/usr/lib/systemd/system/anaconda.target.wants"/* && \
+    rm -f "/usr/lib/systemd/system/basic.target.wants"/* && \
+    rm -f "/usr/lib/systemd/system/local-fs.target.wants"/* && \
+    rm -f "/usr/lib/systemd/system/multi-user.target.wants"/* && \
+    rm -f "/usr/lib/systemd/system/sockets.target.wants"/*udev* && \
+    rm -f "/usr/lib/systemd/system/sockets.target.wants"/*initctl* && \
+    systemctl mask systemd-logind.service getty.target console-getty.service sys-fs-fuse-connections.mount systemd-remount-fs.service dev-hugepages.mount && \
+    rm -rf "/usr/share/info"/* && \
+    rm -rf "/usr/share/man"/* && \
+    rm -rf "/var/cache/yum"/* && \
+    rm -rf "/var/lib/dnf"/history.* && \
+    rm -rf "/var/log"/* && \
+    rm -rf "/home"/.??* && \
+    rm -rf "/root"/.??* && \
+    rm -rf "/tmp"/.??* && \
+    find "/usr/share/i18n/locales" -mindepth 1 -maxdepth 1 -not -name 'en_US' -exec rm -r {} + && \
+    find "/usr/lib64/gconv" -mindepth 1 -maxdepth 1 -type f -not -name 'UTF*' -delete && \
+    find "/usr/share/locale" -mindepth 1 -maxdepth 1 -type d -not \( -name 'en' -o -name 'en_US' \) -exec rm -r {} + && \
+    find "/usr/share/doc" -mindepth 1 -not -type d -not \( -name 'COPYING*' -o -name 'GPL' -o -name '*LICENSE*' \) -delete && \
+    find "/usr/share/doc" -mindepth 1 -type d -empty -delete && \
+    find "/var/cache" -type f -delete && \
+    find "/etc/yum.repos.d" -not \( -iname '*base*' -o -iname '*appstream*' -o -iname '*extras*' -o -iname '*powertools*' -o -iname '*centosplus*' \) -type f -delete ; \
+  } && \
+# done
+  echo '=== all done! ==='
+
+ENTRYPOINT ["/usr/bin/entrypoint"]
+
+CMD ["help"]

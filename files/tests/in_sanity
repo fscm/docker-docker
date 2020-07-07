@@ -1,0 +1,87 @@
+#!/bin/sh
+#
+# Shell script to test the Docker Docker image.
+#
+# Copyright 2016-2020, Frederico Martins
+#   Author: Frederico Martins <http://github.com/fscm>
+#
+# SPDX-License-Identifier: MIT
+#
+# This program is free software. You can use it and/or modify it under the
+# terms of the MIT License.
+#
+
+echo '=== Docker Build Test ==='
+
+# Create temporary dir (if needed)
+if ! [ -d /tmp ]; then
+  mkdir -m 1777 /tmp
+fi
+
+printf '[TEST] Check if Docker is installed... '
+if docker --version > /dev/null 2>&1; then
+  echo 'OK'
+else
+  echo 'Failed'
+  exit 1
+fi
+
+printf '[TEST] Check if Docker daemon is installed... '
+if dockerd --version > /dev/null 2>&1; then
+  echo 'OK'
+else
+  echo 'Failed'
+  exit 1
+fi
+
+printf '[TEST] Check if docker-compose is installed... '
+if docker-compose --version > /dev/null 2>&1; then
+  echo 'OK'
+else
+  echo 'Failed'
+  exit 3
+fi
+
+printf '[TEST] Starting Docker daemon... '
+dockerd --host="unix:///var/run/docker.sock" --pidfile '/var/run/docker.pid' > /dev/null 2>&1 &
+sleep 10
+if [ -f '/var/run/docker.pid' ]; then
+  echo 'OK'
+else
+  echo 'Failed'
+  exit 4
+fi
+
+printf '[TEST] Connecting to Docker daemon... '
+if docker container ls > /dev/null 2>&1; then
+  echo 'OK'
+else
+  echo 'Failed'
+  exit 5
+fi
+
+printf '[TEST] Pulling a Docker image... '
+if (docker pull fscm/centos:latest && docker image ls | grep -q '^fscm/centos.*latest') > /dev/null 2>&1; then
+  echo 'OK'
+else
+  echo 'Failed'
+  exit 6
+fi
+
+printf '[TEST] Running a Docker container... '
+if (docker container run --rm --interactive fscm/centos:latest bash -c 'echo Hello Docker!' | grep -q '^Hello Docker!$') > /dev/null 2>&1; then
+  echo 'OK'
+else
+  echo 'Failed'
+  exit 7
+fi
+
+printf '[TEST] Stoping Docker daemon... '
+if kill -2 "$(cat /var/run/docker.pid)"  > /dev/null 2>&1; then
+  echo 'OK'
+else
+  echo 'Failed'
+  exit 8
+fi
+
+exit 0
