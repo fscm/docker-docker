@@ -69,7 +69,7 @@ else
 fi
 
 # printf '[TEST] Running a Docker container... '
-# if (docker container run --rm --interactive fscm/centos:latest bash -c 'echo Hello Docker!' | grep -q '^Hello Docker!$') > /dev/null 2>&1; then
+# if (docker container run --rm fscm/centos:latest bash -c 'echo Hello Docker!' | grep -q '^Hello Docker!$') > /dev/null 2>&1; then
 #   echo 'OK'
 # else
 #   echo 'Failed'
