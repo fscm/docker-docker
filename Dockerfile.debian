@@ -33,6 +33,7 @@ RUN \
   echo '=== setting build env ===' && \
   time { \
     set +h && \
+    export OS_CODENAME="$(. /etc/os-release; echo ${VERSION_CODENAME})" && \
     export TIMEFORMAT='=== time taken: %lR (s:%lS u:%lU)' ; \
   } && \
 # build structure
@@ -58,11 +59,27 @@ RUN \
     apt-get -qq -y -o=Dpkg::Use-Pty=0 --no-install-recommends install \
       binutils \
       ca-certificates \
+      coreutils \
       curl \
+      dbus \
+      debian-archive-keyring \
+      debootstrap \
+      dpkg-dev \
       findutils \
       gzip \
       tar \
+      wget \
       > /dev/null 2>&1 ; \
+  } && \
+# build base os
+  echo '=== building base os ===' && \
+  time { \
+    debootstrap \
+    --variant='minbase' \
+    --arch=amd64 \
+    --include=ca-certificates,curl,e2fsprogs,e2fslibs,iproute2,iptables,kmod,libcgroup1,libdevmapper1.02.1,libseccomp2,libssl1.1,openssl,xfsprogs,xz-utils \
+    "${OS_CODENAME}" \
+    "${__BUILD_DIR__}" ; \
   } && \
 # docker
   echo '=== installing docker ===' && \
@@ -86,25 +103,70 @@ RUN \
 # stripping
   echo '=== stripping libraries and binaries ===' && \
   time { \
-    find "${__BUILD_DIR__}/usr/local/bin" -type f -not -links +1 -exec strip --strip-all {} ';' ; \
+    for folder in lib lib64; do \
+      find "${__BUILD_DIR__}/usr/${folder}" -type f -name '*.a' -exec strip --strip-debug {} ';' ; \
+      find "${__BUILD_DIR__}/usr/${folder}" -type f -name '*.so*' -exec strip --strip-unneeded {} ';' ; \
+    done && \
+    for folder in bin sbin; do \
+      #find "${__BUILD_DIR__}/usr/${folder}" -type f -not -links +1 -exec strip --strip-all {} ';' ; \
+      find "${__BUILD_DIR__}/usr/local/${folder}" -type f -not -links +1 -exec strip --strip-all {} ';' ; \
+    done ; \
+  } && \
+# system settings / cleanup
+  echo '=== system settings / cleaning up ===' && \
+  time { \
+    #echo "deb http://deb.debian.org/debian ${OS_CODENAME} main non-free contrib" > /etc/apt/sources.list && \
+    #echo "deb http://security.debian.org/ ${OS_CODENAME}/updates main contrib non-free" >> /etc/apt/sources.list && \
+    #echo "deb http://deb.debian.org/debian ${OS_CODENAME}-updates main contrib non-free" >> /etc/apt/sources.list && \
+    apt-get clean && \
+    rm -f "${__BUILD_DIR__}/etc/apt/apt.conf.d/01autoremove-kernels" && \
+    APT_GET_CLEAN='"rm -f /var/cache/apt/archives/*.deb /var/cache/apt/archives/partial/*.deb /var/cache/apt/*.bin || true";' && \
+    printf 'DPkg::Post-Invoke { %s };\nAPT::Update::Post-Invoke { %s };\nDir::Cache::pkgcache "";\nDir::Cache::srcpkgcache "";\n' "${APT_GET_CLEAN}" "${APT_GET_CLEAN}" > "${__BUILD_DIR__}/etc/apt/apt.conf.d/90docker-clean" && \
+    printf 'DPkg::Use-Pty "false";\n' > "${__BUILD_DIR__}/etc/apt/apt.conf.d/90docker-no-dpkg-output" && \
+    printf 'Acquire::Languages "none";\n' > "${__BUILD_DIR__}/etc/apt/apt.conf.d/90docker-no-languages" && \
+    printf 'Acquire::GzipIndexes "true";\nAcquire::CompressionTypes::Order:: "gz";\n' > "${__BUILD_DIR__}/etc/apt/apt.conf.d/90docker-gzip-indexes" && \
+    printf 'APT::AutoRemove::SuggestsImportant "false";\n' > "${__BUILD_DIR__}/etc/apt/apt.conf.d/90docker-autoremove-suggests" && \
+    printf 'APT::Install-Recommends "false";\n' > "${__BUILD_DIR__}/etc/apt/apt.conf.d/90docker-no-recommends" && \
+    printf 'force-unsafe-io\n' > "${__BUILD_DIR__}/etc/dpkg/dpkg.cfg.d/90docker-apt-speedup" && \
+    printf 'path-exclude=/usr/share/doc/*\npath-exclude=/usr/share/info/*\npath-exclude=/usr/share/locale/*\npath-exclude=/usr/share/man/*\npath-include=/usr/share/doc/*/copyright\n' > "${__BUILD_DIR__}/etc/dpkg/dpkg.cfg.d/90docker-excludes" && \
+    #echo 'docker' > "${__BUILD_DIR__}/run/systemd/container" && \
+    echo '' > "${__BUILD_DIR__}/etc/resolv.conf" && \
+    echo 'host' > "${__BUILD_DIR__}/etc/hostname" && \
+    :> "${__BUILD_DIR__}/etc/machine-id" && \
+    find "${__BUILD_DIR__}/etc" -path '*/systemd/system/*.wants/*' \( -type l -o -type f \) -delete && \
+    if [ -x "${__BUILD_DIR__}/usr/bin/dpkg-divert" ]; then chroot "${__BUILD_DIR__}/" dpkg-divert --local --rename --add /sbin/initctl; fi && \
+    printf '#!/bin/sh\nexit 101\n' > "${__BUILD_DIR__}/usr/sbin/policy-rc.d" && \
+    printf '#!/bin/sh\nexit 0\n' > "${__BUILD_DIR__}/sbin/initctl" && \
+    chmod 0755 "${__BUILD_DIR__}/usr/sbin/policy-rc.d" "${__BUILD_DIR__}/sbin/initctl" && \
+    rm -rf "${__BUILD_DIR__}/usr/share/info"/* && \
+    rm -rf "${__BUILD_DIR__}/usr/share/man"/* && \
+    rm -rf "${__BUILD_DIR__}/var/cache/apt"/* && \
+    rm -rf "${__BUILD_DIR__}/var/lib/apt/lists"/* && \
+    rm -rf "${__BUILD_DIR__}/var/log"/* && \
+    rm -rf "${__BUILD_DIR__}/dev"/.??* && \
+    rm -rf "${__BUILD_DIR__}/home"/.??* && \
+    rm -rf "${__BUILD_DIR__}/root"/.??* && \
+    rm -rf "${__BUILD_DIR__}/tmp"/.??* && \
+    rm -rf "${__BUILD_DIR__}/boot" && \
+    rm -rf "${__BUILD_DIR__}/proc" && \
+    rm -rf "${__BUILD_DIR__}/sys" && \
+    find "${__BUILD_DIR__}/usr/lib/x86_64-linux-gnu/gconv" -mindepth 1 -maxdepth 1 -type f -not -name 'UTF*' -delete && \
+    find "${__BUILD_DIR__}/usr/share/locale" -mindepth 1 -maxdepth 1 -type d -not \( -name 'en' -o -name 'en_US' \) -exec rm -r {} + && \
+    find "${__BUILD_DIR__}/usr/share/doc" -mindepth 1 -not -type d -not \( -name 'COPYING*' -o -name 'GPL' -o -name '*LICENSE*' -o -name 'copyright' \) -delete && \
+    find "${__BUILD_DIR__}/usr/share/doc" -mindepth 1 -type d -empty -delete && \
+    find "${__BUILD_DIR__}/var/cache" -type f -delete ; \
   } && \
 # licenses
   echo '=== project licenses ===' && \
   time { \
     install --owner=${__USER__} --group=${__USER__} --mode=0644 --target-directory="${__BUILD_DIR__}/licenses" "${__WORK_DIR__}/LICENSE" ; \
   } && \
-# system settings
-  echo '=== system settings ===' && \
-  time { \
-    install --directory --owner="${__USER__}" --group="${__USER__}" --mode=0755 "${__BUILD_DIR__}/run/systemd" && \
-    echo 'docker' > "${__BUILD_DIR__}/run/systemd/container" ; \
-  } && \
 # done
   echo '=== all done! ==='
 
 
 
-FROM fscm/debian:buster
+FROM scratch
 
 ARG __BUILD_DIR__
 ARG __DATA_DIR__
@@ -130,63 +192,6 @@ COPY --from=build "${__BUILD_DIR__}" "/"
 VOLUME ["${__DATA_DIR__}"]
 
 WORKDIR "${__DATA_DIR__}"
-
-SHELL ["/bin/bash", "-c"]
-
-RUN \
-# build env
-  echo '=== setting build env ===' && \
-  time { \
-    set +h && \
-    export TIMEFORMAT='=== time taken: %lR (s:%lS u:%lU)' ; \
-  } && \
-# dependencies
-  echo '=== instaling dependencies ===' && \
-  time { \
-    apt-get -qq update && \
-    #apt-get -qq -y -o=Dpkg::Use-Pty=0 --no-install-recommends upgrade \
-    #  > /dev/null 2>&1 && \
-    apt-get -qq -y -o=Dpkg::Use-Pty=0 --no-install-recommends install \
-      ca-certificates \
-      curl \
-      e2fsprogs \
-      e2fslibs \
-      findutils \
-      gzip \
-      iproute2 \
-      iptables \
-      kmod \
-      libcgroup1 \
-      libdevmapper1.02.1 \
-      libseccomp2 \
-      libssl1.1 \
-      openssl \
-      tar \
-      xfsprogs \
-      xz-utils \
-      > /dev/null 2>&1 ; \
-  } && \
-# cleanup
-  echo '=== cleaning up ===' && \
-  time { \
-    apt-get clean && \
-    rm -f /etc/apt/apt.conf.d/01autoremove-kernels && \
-    rm -rf "/usr/share/info"/* && \
-    rm -rf "/usr/share/man"/* && \
-    rm -rf "/var/cache/apt"/* && \
-    rm -rf "/var/lib/apt/lists"/* && \
-    rm -rf "/var/log"/* && \
-    rm -rf "/dev"/.??* && \
-    rm -rf "/home"/.??* && \
-    rm -rf "/root"/.??* && \
-    rm -rf "/tmp"/.??* && \
-    find "/usr/share/locale" -mindepth 1 -maxdepth 1 -type d -not \( -iname 'en' -o -iname 'en_US' \) -exec rm -r {} + && \
-    find "/usr/share/doc" -mindepth 1 -not -type d -not -name 'copyright' -delete && \
-    find "/usr/share/doc" -mindepth 1 -type d -empty -delete && \
-    find "/var/cache" -type f -delete ; \
-  } && \
-# done
-  echo '=== all done! ==='
 
 ENTRYPOINT ["/usr/bin/entrypoint"]
 

@@ -56,9 +56,46 @@ RUN \
     yum --assumeyes --quiet --setopt=install_weak_deps=False install \
       binutils \
       curl \
+      device-mapper-persistent-data \
       findutils \
       gzip \
-      tar ; \
+      lvm2 \
+      tar \
+      yum-utils ; \
+  } && \
+# build base os
+  echo '=== building base os ===' && \
+  time { \
+    yumdownloader --assumeyes --quiet --arch="$(arch)" --destdir="${__WORK_DIR__}" centos-release && \
+    rpm --root "${__BUILD_DIR__}" --initdb && \
+    rpm --root "${__BUILD_DIR__}" --import /etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial && \
+    rpm --root "${__BUILD_DIR__}" --install --nodeps --noscripts "${__WORK_DIR__}"/centos-release*.rpm && \
+    yum --assumeyes --quiet --disablerepo='*' --enablerepo='BaseOS' --installroot="${__BUILD_DIR__}" --setopt='tsflags=nodocs' --setopt='install_weak_deps=False' --setopt='override_install_langs=C.utf8' install \
+      bash \
+      ca-certificates \
+      centos-repos \
+      coreutils-single \
+      curl \
+      device-mapper-libs \
+      e2fsprogs \
+      e2fsprogs-libs \
+      findutils \
+      glibc-minimal-langpack \
+      gzip \
+      hostname \
+      iproute \
+      iptables \
+      kmod \
+      libcgroup \
+      libseccomp \
+      openssl \
+      openssl-libs \
+      tar \
+      xfsprogs \
+      xz \
+      yum && \
+    install --directory --owner="${__USER__}" --group="${__USER__}" --mode=0755 "${__BUILD_DIR__}/licenses/centos" && \
+    ln --symbolic --force '/usr/share/centos-release/EULA' "${__BUILD_DIR__}/licenses/centos/EULA" ; \
   } && \
 # docker
   echo '=== installing docker ===' && \
@@ -82,25 +119,64 @@ RUN \
 # stripping
   echo '=== stripping libraries and binaries ===' && \
   time { \
-    find "${__BUILD_DIR__}/usr/local/bin" -type f -not -links +1 -exec strip --strip-all {} ';' ; \
+    for folder in lib lib64; do \
+      find "${__BUILD_DIR__}/usr/${folder}" -type f -name '*.a' -exec strip --strip-debug {} ';' ; \
+      find "${__BUILD_DIR__}/usr/${folder}" -type f -name '*.so*' -exec strip --strip-unneeded {} ';' ; \
+    done && \
+    for folder in bin sbin; do \
+      #find "${__BUILD_DIR__}/usr/${folder}" -type f -not -links +1 -exec strip --strip-all {} ';' ; \
+      find "${__BUILD_DIR__}/usr/local/${folder}" -type f -not -links +1 -exec strip --strip-all {} ';' ; \
+    done ; \
+  } && \
+# system settings / cleanup
+  echo '=== system settings / cleaning up ===' && \
+  time { \
+    sed -i -e '/best=True/a exclude=*.i?86\ntsflags=nodocs' "${__BUILD_DIR__}/etc/yum.conf" && \
+    echo 'container' > "${__BUILD_DIR__}/etc/dnf/vars/infra" && \
+    echo 'docker' > "${__BUILD_DIR__}/run/systemd/container" && \
+    echo '%_install_langs C.utf8' > "${__BUILD_DIR__}/etc/rpm/macros.image-language-conf" && \
+    :> "${__BUILD_DIR__}/etc/machine-id" && \
+    find "${__BUILD_DIR__}/lib/systemd/system" -path '*/sysinit.target.wants/*' \( -type l -o -type f \) -not -name 'systemd-tmpfiles-setup.service' -delete && \
+    find "${__BUILD_DIR__}/etc" -path '*/systemd/system/*.wants/*' \( -type l -o -type f \) -delete && \
+    rm -f "${__BUILD_DIR__}/lib/systemd/system/anaconda.target.wants"/* && \
+    rm -f "${__BUILD_DIR__}/lib/systemd/system/basic.target.wants"/* && \
+    rm -f "${__BUILD_DIR__}/lib/systemd/system/local-fs.target.wants"/* && \
+    rm -f "${__BUILD_DIR__}/lib/systemd/system/multi-user.target.wants"/* && \
+    rm -f "${__BUILD_DIR__}/lib/systemd/system/sockets.target.wants"/*udev* && \
+    rm -f "${__BUILD_DIR__}/lib/systemd/system/sockets.target.wants"/*initctl* && \
+    if [ -x "${__BUILD_DIR__}/usr/bin/systemctl" ]; then chroot "${__BUILD_DIR__}/" systemctl mask systemd-logind.service getty.target console-getty.service sys-fs-fuse-connections.mount systemd-remount-fs.service dev-hugepages.mount; fi && \
+    rm -rf "${__BUILD_DIR__}/usr/share/info"/* && \
+    rm -rf "${__BUILD_DIR__}/usr/share/man"/* && \
+    rm -rf "${__BUILD_DIR__}/var/cache/yum"/* && \
+    rm -rf "${__BUILD_DIR__}/var/lib/dnf"/history.* && \
+    rm -rf "${__BUILD_DIR__}/var/log"/* && \
+    rm -rf "${__BUILD_DIR__}/sbin/sln" && \
+    rm -rf "${__BUILD_DIR__}/dev"/.??* && \
+    rm -rf "${__BUILD_DIR__}/home"/.??* && \
+    rm -rf "${__BUILD_DIR__}/root"/.??* && \
+    rm -rf "${__BUILD_DIR__}/tmp"/.??* && \
+    rm -rf "${__BUILD_DIR__}/boot" && \
+    rm -rf "${__BUILD_DIR__}/proc" && \
+    rm -rf "${__BUILD_DIR__}/sys" && \
+    find "${__BUILD_DIR__}/usr/share/i18n/locales" -mindepth 1 -maxdepth 1 -not -name 'en_US' -exec rm -r {} + && \
+    find "${__BUILD_DIR__}/usr/lib64/gconv" -mindepth 1 -maxdepth 1 -type f -not -name 'UTF*' -delete && \
+    find "${__BUILD_DIR__}/usr/share/locale" -mindepth 1 -maxdepth 1 -type d -not \( -name 'en' -o -name 'en_US' \) -exec rm -r {} + && \
+    find "${__BUILD_DIR__}/usr/share/doc" -mindepth 1 -not -type d -not \( -name 'COPYING*' -o -name 'GPL' -o -name '*LICENSE*' \) -delete && \
+    find "${__BUILD_DIR__}/usr/share/doc" -mindepth 1 -type d -empty -delete && \
+    find "${__BUILD_DIR__}/var/cache" -type f -delete && \
+    find "${__BUILD_DIR__}/etc/yum.repos.d" -not \( -iname '*base*' -o -iname '*appstream*' -o -iname '*extras*' -o -iname '*powertools*' -o -iname '*centosplus*' \) -type f -delete ; \
   } && \
 # licenses
   echo '=== project licenses ===' && \
   time { \
     install --owner=${__USER__} --group=${__USER__} --mode=0644 --target-directory="${__BUILD_DIR__}/licenses" "${__WORK_DIR__}/LICENSE" ; \
   } && \
-# system settings
-  echo '=== system settings ===' && \
-  time { \
-    install --directory --owner="${__USER__}" --group="${__USER__}" --mode=0755 "${__BUILD_DIR__}/run/systemd" && \
-    echo 'docker' > "${__BUILD_DIR__}/run/systemd/container" ; \
-  } && \
 # done
   echo '=== all done! ==='
 
 
 
-FROM fscm/centos:8
+FROM scratch
 
 ARG __BUILD_DIR__
 ARG __DATA_DIR__
@@ -125,69 +201,6 @@ COPY --from=build "${__BUILD_DIR__}" "/"
 VOLUME ["${__DATA_DIR__}"]
 
 WORKDIR "${__DATA_DIR__}"
-
-SHELL ["/bin/bash", "-c"]
-
-RUN \
-# build env
-  echo '=== setting build env ===' && \
-  time { \
-    set +h && \
-    export TIMEFORMAT='=== time taken: %lR (s:%lS u:%lU)' ; \
-  } && \
-# dependencies
-  echo '=== instaling dependencies ===' && \
-  time { \
-    #yum --assumeyes --quiet --setopt=install_weak_deps=False update && \
-    yum --assumeyes --quiet --setopt=install_weak_deps=False install \
-      ca-certificates \
-      curl \
-      device-mapper-libs \
-      e2fsprogs \
-      e2fsprogs-libs \
-      findutils \
-      gzip \
-      iproute \
-      iptables \
-      kmod \
-      libcgroup \
-      libseccomp \
-      openssl \
-      openssl-libs \
-      tar \
-      xfsprogs \
-      xz ; \
-  } && \
-# cleanup
-  echo '=== cleaning up ===' && \
-  time { \
-    find "/lib/systemd/system/sysinit.target.wants" \( -type l -o -type f \) -not -name 'systemd-tmpfiles-setup.service' -delete && \
-    find "/etc/systemd/system"/*.wants \( -type l -o -type f \) -delete && \
-    rm -f "/usr/lib/systemd/system/anaconda.target.wants"/* && \
-    rm -f "/usr/lib/systemd/system/basic.target.wants"/* && \
-    rm -f "/usr/lib/systemd/system/local-fs.target.wants"/* && \
-    rm -f "/usr/lib/systemd/system/multi-user.target.wants"/* && \
-    rm -f "/usr/lib/systemd/system/sockets.target.wants"/*udev* && \
-    rm -f "/usr/lib/systemd/system/sockets.target.wants"/*initctl* && \
-    systemctl mask systemd-logind.service getty.target console-getty.service sys-fs-fuse-connections.mount systemd-remount-fs.service dev-hugepages.mount && \
-    rm -rf "/usr/share/info"/* && \
-    rm -rf "/usr/share/man"/* && \
-    rm -rf "/var/cache/yum"/* && \
-    rm -rf "/var/lib/dnf"/history.* && \
-    rm -rf "/var/log"/* && \
-    rm -rf "/home"/.??* && \
-    rm -rf "/root"/.??* && \
-    rm -rf "/tmp"/.??* && \
-    find "/usr/share/i18n/locales" -mindepth 1 -maxdepth 1 -not -name 'en_US' -exec rm -r {} + && \
-    find "/usr/lib64/gconv" -mindepth 1 -maxdepth 1 -type f -not -name 'UTF*' -delete && \
-    find "/usr/share/locale" -mindepth 1 -maxdepth 1 -type d -not \( -name 'en' -o -name 'en_US' \) -exec rm -r {} + && \
-    find "/usr/share/doc" -mindepth 1 -not -type d -not \( -name 'COPYING*' -o -name 'GPL' -o -name '*LICENSE*' \) -delete && \
-    find "/usr/share/doc" -mindepth 1 -type d -empty -delete && \
-    find "/var/cache" -type f -delete && \
-    find "/etc/yum.repos.d" -not \( -iname '*base*' -o -iname '*appstream*' -o -iname '*extras*' -o -iname '*powertools*' -o -iname '*centosplus*' \) -type f -delete ; \
-  } && \
-# done
-  echo '=== all done! ==='
 
 ENTRYPOINT ["/usr/bin/entrypoint"]
 
