@@ -4,8 +4,10 @@ A small Docker in Docker image that can be used to start a Docker daemon.
 
 ## Supported tags
 
-- `19.03.9-centos`, `centos`
-- `19.03.9-debian`, `19.03.9`, `debian`, `latest`
+- `19.03.9-centos`
+- `19.03.9-debian`, `19.03.9`
+- `19.03.12-centos`, `centos`
+- `19.03.12-debian`, `19.03.12`, `debian`, `latest`
 
 ## What is Docker?
 
