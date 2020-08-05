@@ -77,6 +77,7 @@ RUN \
     debootstrap \
     --variant='minbase' \
     --arch=amd64 \
+    --exclude='sensible-utils' \
     --include=ca-certificates,curl,e2fsprogs,e2fslibs,iproute2,iptables,kmod,libcgroup1,libdevmapper1.02.1,libseccomp2,libssl1.1,openssl,xfsprogs,xz-utils \
     "${OS_CODENAME}" \
     "${__BUILD_DIR__}" ; \
