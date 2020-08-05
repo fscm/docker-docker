@@ -10,7 +10,7 @@ ARG __BUILD_DIR__
 ARG __DATA_DIR__
 ARG DOCKER_CHANNEL="stable"
 ARG DOCKER_VERSION="19.03.12"
-ARG DOCKER_COMPOSE_VERSION="1.26.2"
+#ARG DOCKER_COMPOSE_VERSION="1.26.2"
 ARG __USER__="root"
 ARG __WORK_DIR__="/work"
 
@@ -109,6 +109,7 @@ RUN \
 # docker-compose
   echo '=== installing docker-compose ===' && \
   time { \
+    DOCKER_COMPOSE_VERSION="$(curl --silent --location --retry 3 'https://api.github.com/repos/docker/compose/releases/latest' | sed -n -e '/tag_name/ s/.*"\(.*\)",/\1/p')" && \
     curl --silent --location --retry 3 "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-Linux-x86_64" \
       --output "${__BUILD_DIR__}/usr/local/bin/docker-compose" && \
     chmod 0755 "${__BUILD_DIR__}/usr/local/bin/docker-compose" && \
