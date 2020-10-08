@@ -89,7 +89,6 @@ volume.
 
 #### Start the Docker daemon
 
-
 After configuring the Docker daemon the same can now be started.
 
 Starting the Docker daemon can be done with the `start` command.
