@@ -22,7 +22,7 @@ ACTION_INIT=0
 ACTION_START=0
 TLS_ENABLED=0
 
-__DATA_DIR__="/data"
+__DATA_DIR__="${DATA_DIR:-/data}"
 __DOCKER_TLS_CERTDIR__="${DOCKER_TLS_CERTDIR:-${__DATA_DIR__}/certs}"
 
 __CA_PRI_KEY__="${__DOCKER_TLS_CERTDIR__}/ca-key.pem"
